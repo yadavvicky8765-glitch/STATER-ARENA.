@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14182b">
+<title>Starter Arena</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14182b;--panel:#1f2547;--line:#323a6b;--gold:#ffb400;--teal:#2ee6c5;--text:#eef0ff;--mute:#9aa3d6;--red:#ff5d6c}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:500 16px 'Rajdhani',system-ui,sans-serif;min-height:100vh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:2px solid var(--line)}
+header h1{font-size:24px;font-weight:700;color:var(--gold);flex:1;letter-spacing:.5px}
+button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;background:var(--gold);color:#241a00;cursor:pointer}
+button.alt{background:transparent;color:var(--text);border:2px solid var(--line)}
+button.sm{padding:6px 12px;font-size:14px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+main{padding:14px;max-width:520px;margin:auto}
+input,select{width:100%;font:inherit;padding:12px;border-radius:10px;border:2px solid var(--line);background:var(--bg);color:var(--text);margin:6px 0}
+.card{background:var(--panel);border-left:5px solid var(--gold);border-radius:12px;padding:14px;margin:12px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1}.mute{color:var(--mute)}
+.coin{background:var(--panel);border:2px solid var(--gold);color:var(--gold);display:flex;gap:6px;align-items:center}
+.big{font-size:30px;font-weight:700;margin:10px 0}
+.stats{display:flex;gap:14px;margin:8px 0}.stats b{color:var(--teal);font-size:20px;display:block}
+.secret{background:var(--bg);border:2px dashed var(--teal);border-radius:10px;padding:10px;margin-top:10px}
+#toast{position:fixed;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom));background:var(--teal);color:#042b24;padding:12px;border-radius:10px;font-weight:700;text-align:center;display:none;max-width:520px;margin:auto}
+.modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal .card{width:100%;max-width:420px;margin:0}
+h2{font-size:20px;margin:8px 0}
+</style>
+</head>
+<body>
+<header><h1>Starter Arena</h1><div id="hbar" class="row"></div></header>
+<main id="app"></main>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+// ====== 1) अपना Firebase config यहाँ चिपका दे ======
+const firebaseConfig = {
+  apiKey: "AIzaSyCqePCF-QoV1cqubGAbdzqSd9UGEZArT50",
+  authDomain: "starter-arena.firebaseapp.com",
+  projectId: "starter-arena",
+  storageBucket: "starter-arena.firebasestorage.app",
+  messagingSenderId: "731332767852",
+  appId: "1:731332767852:web:6da6318d849c442bb1a849"
+};
+// ====== 2) अपना YouTube चैनल लिंक ======
+const YT_URL = ""; // खाली = चैनल नहीं खुलेगा, सीधे कॉइन जोड़ने का फॉर्म दिखेगा
+const ADMIN_EMAIL = "admin@starterarena.app";
+// =====================================================
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth(), db = firebase.firestore(), FV = firebase.firestore.FieldValue;
+const $ = s => document.querySelector(s);
+const app = $('#app'), hbar = $('#hbar');
+const mail = n => n.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') + '@starterarena.app';
+let me = null, adminMode = false, isAdmin = false, unsubs = [];
+
+function toast(t) { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = 'none', 3200); }
+function clear() { unsubs.forEach(u => u()); unsubs = []; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function fail(e) { console.error(e); toast(e.code === 'permission-denied' ? 'अनुमति नहीं मिली। कोड गलत है या लिमिट पूरी हो गई।' : (e.message || 'कुछ गड़बड़ हुई')); }
+
+// ---------- Login ----------
+function showLogin() {
+  clear(); hbar.innerHTML = '<button class="alt sm" id="adm">Admin</button>';
+  $('#adm').onclick = () => { adminMode = !adminMode; showLogin(); };
+  app.innerHTML = `<div class="card"><h2>${adminMode ? 'Admin Login' : 'Starter Arena में आपका स्वागत है'}</h2>
+    <input id="u" placeholder="यूज़र नेम" autocapitalize="none" autocomplete="username">
+    <input id="p" type="password" placeholder="पासवर्ड (कम से कम 6 अक्षर)" autocomplete="current-password">
+    <div class="row"><button class="grow" id="login">Login</button>
+    ${adminMode ? '' : '<button class="grow alt" id="reg">Register</button>'}</div></div>`;
+  $('#login').onclick = async () => {
+    try { await auth.signInWithEmailAndPassword(mail($('#u').value), $('#p').value); }
+    catch (e) { toast('यूज़र नेम या पासवर्ड गलत है'); }
+  };
+  if (!adminMode) $('#reg').onclick = async () => {
+    const name = $('#u').value.trim();
+    if (name.length < 3) return toast('नाम कम से कम 3 अक्षर का रखो');
+    try {
+      const c = await auth.createUserWithEmailAndPassword(mail(name), $('#p').value);
+      await db.doc('users/' + c.user.uid).set({ name, coins: 0, addCount: 0, lastCode: '' });
+    } catch (e) { toast(e.code === 'auth/email-already-in-use' ? 'ये नाम पहले से लिया हुआ है' : 'रजिस्टर नहीं हुआ: ' + e.message); }
+  };
+}
+
+auth.onAuthStateChanged(async u => {
+  if (!u) { me = null; isAdmin = false; return showLogin(); }
+  if (u.email === ADMIN_EMAIL) {
+    if (!adminMode) { await auth.signOut(); return toast('यह Admin अकाउंट है। ऊपर Admin बटन दबाओ।'); }
+    isAdmin = true; return showAdmin();
+  }
+  if (adminMode) { await auth.signOut(); return toast('यह Admin नहीं है'); }
+  clear();
+  unsubs.push(db.doc('users/' + u.uid).onSnapshot(s => { me = { uid: u.uid, ...s.data() }; showHome(); }));
+});
+
+const logoutBtn = '<button class="alt sm" id="out">Logout</button>';
+
+// ---------- Player home ----------
+let matches = [], mUnsub = null;
+function showHome() {
+  if (!me || !me.name) return;
+  hbar.innerHTML = `<button class="coin sm" id="coin">🪙 ${me.coins} +</button>${logoutBtn}`;
+  $('#out').onclick = () => auth.signOut(); $('#coin').onclick = coinDialog;
+  if (!mUnsub) { mUnsub = db.collection('matches').orderBy('created', 'desc').onSnapshot(s => { matches = s.docs.map(d => ({ id: d.id, ...d.data() })); renderMatches(); }); unsubs.push(() => { mUnsub(); mUnsub = null; }); }
+  renderMatches();
+}
+function renderMatches() {
+  if (!me || isAdmin) return;
+  app.innerHTML = `<h2>Hi ${esc(me.name)} 👋</h2>` + (matches.length ? matches.map(m => {
+    const joined = (m.players || []).includes(me.uid);
+    return `<div class="card"><div class="row"><b class="grow">${esc(m.title)}</b><span class="mute">${(m.players || []).length} खिलाड़ी</span></div>
+      <div class="stats"><div><b>${m.fee}</b>एंट्री</div><div><b>${m.prize}</b>इनाम</div><div><b>${m.kill}</b>प्रति किल</div></div>
+      ${joined ? `<div class="secret" id="s-${m.id}">Room ID/Password लोड हो रहा है…</div>` : `<button data-j="${m.id}">Join (${m.fee} कॉइन)</button>`}</div>`;
+  }).join('') : '<div class="card mute">अभी कोई मैच नहीं है। थोड़ी देर बाद देखो।</div>');
+  app.querySelectorAll('[data-j]').forEach(b => b.onclick = () => join(b.dataset.j));
+  matches.filter(m => (m.players || []).includes(me.uid)).forEach(async m => {
+    try { const s = (await db.doc(`matches/${m.id}/secret/s`).get()).data(); const e = document.getElementById('s-' + m.id);
+      if (e && s) e.innerHTML = `Room ID: <b>${esc(s.room)}</b><br>Password: <b>${esc(s.pass)}</b>`; } catch (e) { }
+  });
+}
+async function join(id) {
+  const m = matches.find(x => x.id === id);
+  if (me.coins < m.fee) return toast('कॉइन कम हैं। ऊपर कॉइन बटन से जोड़ो।');
+  try {
+    const b = db.batch();
+    b.update(db.doc('users/' + me.uid), { coins: me.coins - m.fee });
+    b.update(db.doc('matches/' + id), { players: FV.arrayUnion(me.uid), names: FV.arrayUnion(me.name) });
+    await b.commit(); toast('Join हो गया! Room ID नीचे दिख रही है');
+  } catch (e) { fail(e); }
+}
+
+// ---------- Coins ----------
+function modal(html) { const d = document.createElement('div'); d.className = 'modal'; d.innerHTML = `<div class="card">${html}</div>`; d.onclick = e => { if (e.target === d) d.remove(); }; document.body.appendChild(d); return d; }
+function coinDialog() {
+  const left = 3 - (me.addCount || 0);
+  const d = modal(`<h2>🪙 ${me.coins} कॉइन</h2>${YT_URL ? '<p class="mute">कॉइन जोड़ने के लिए पहले हमारा YouTube चैनल खोलो।</p><div class="row" style="margin-top:10px"><button class="grow" id="yt">▶ YouTube खोलो (+)</button></div>' : ''}
+    <div id="addbox" style="margin-top:12px"></div>`);
+  const box = d.querySelector('#addbox');
+  const form = () => {
+    if (left <= 0) { box.innerHTML = '<p class="mute">3 बार की लिमिट पूरी हो गई। Admin से अनुमति माँगो।</p><button id="req">Admin को रिक्वेस्ट भेजो</button>';
+      box.querySelector('#req').onclick = async () => { try { await db.collection('requests').add({ uid: me.uid, name: me.name, t: Date.now() }); toast('रिक्वेस्ट भेज दी गई'); d.remove(); } catch (e) { fail(e); } }; return; }
+    box.innerHTML = `<p class="mute">बचे हुए मौके: ${left}</p><select id="amt"><option>10</option><option>20</option></select>
+      <input id="code" placeholder="कोड डालो" autocapitalize="none"><button id="ok">OK</button>`;
+    box.querySelector('#ok').onclick = async () => {
+      const amt = +box.querySelector('#amt').value, code = box.querySelector('#code').value.trim();
+      try { await db.doc('users/' + me.uid).update({ coins: me.coins + amt, addCount: (me.addCount || 0) + 1, lastCode: code }); toast(amt + ' कॉइन जुड़ गए!'); d.remove(); }
+      catch (e) { fail(e); }
+    };
+  };
+  if (YT_URL) d.querySelector('#yt').onclick = () => { window.open(YT_URL, '_blank'); form(); }; else form();
+}
+
+// ---------- Admin ----------
+let aMatches = [], reqs = [];
+function showAdmin() {
+  clear(); hbar.innerHTML = '<span class="mute">Admin</span>' + logoutBtn; $('#out').onclick = () => { adminMode = false; auth.signOut(); };
+  unsubs.push(db.collection('matches').orderBy('created', 'desc').onSnapshot(s => { aMatches = s.docs.map(d => ({ id: d.id, ...d.data() })); drawAdmin(); }));
+  unsubs.push(db.collection('requests').onSnapshot(s => { reqs = s.docs.map(d => ({ id: d.id, ...d.data() })); drawAdmin(); }));
+  drawAdmin(true);
+}
+function drawAdmin(first) {
+  if (!isAdmin) return;
+  const keep = ['t', 'fee', 'pr', 'k', 'rid', 'rp', 'code'].map(i => { const e = document.getElementById('a-' + i); return e ? e.value : ''; });
+  app.innerHTML = `<div class="card"><h2>नया मैच बनाओ</h2>
+    <input id="a-t" placeholder="मैच का नाम"><div class="row"><input class="grow" id="a-fee" type="number" placeholder="एंट्री फीस"><input class="grow" id="a-pr" type="number" placeholder="विनिंग प्राइज"></div>
+    <input id="a-k" type="number" placeholder="प्रति किल कॉइन"><input id="a-rid" placeholder="Room ID"><input id="a-rp" placeholder="Room Password"><button id="mk">मैच बनाओ</button></div>
+    <div class="card"><h2>कॉइन कोड सेट करो</h2><input id="a-code" placeholder="नया कोड"><button id="sc">कोड सेव करो</button></div>
+    <div class="card"><h2>कॉइन रिक्वेस्ट (${reqs.length})</h2>${reqs.map(r => `<div class="row"><span class="grow">${esc(r.name)}</span><button class="sm" data-ok="${r.id}" data-u="${r.uid}">Approve</button></div>`).join('') || '<span class="mute">कोई रिक्वेस्ट नहीं</span>'}</div>
+    <h2>सारे मैच</h2>${aMatches.map(m => `<div class="card"><b>${esc(m.title)}</b> <span class="mute">फीस ${m.fee} · इनाम ${m.prize} · किल ${m.kill}</span>
+      <div style="margin-top:8px">${(m.players || []).map((u, i) => `<div class="row"><span class="grow">${esc((m.names || [])[i] || u)}</span><button class="sm" data-g="${u}">+ कॉइन दो</button></div>`).join('') || '<span class="mute">अभी कोई नहीं जुड़ा</span>'}</div>
+      <button class="alt sm" style="margin-top:8px" data-del="${m.id}">मैच हटाओ</button></div>`).join('')}`;
+  ['t', 'fee', 'pr', 'k', 'rid', 'rp', 'code'].forEach((i, n) => { const e = document.getElementById('a-' + i); if (e && keep[n]) e.value = keep[n]; });
+  $('#mk').onclick = async () => {
+    const v = i => $('#a-' + i).value.trim(), t = v('t'); if (!t || !v('rid')) return toast('नाम और Room ID ज़रूरी हैं');
+    try {
+      const ref = db.collection('matches').doc(), b = db.batch();
+      b.set(ref, { title: t, fee: +v('fee') || 0, prize: +v('pr') || 0, kill: +v('k') || 0, players: [], names: [], created: Date.now() });
+      b.set(ref.collection('secret').doc('s'), { room: v('rid'), pass: v('rp') });
+      await b.commit(); toast('मैच बन गया'); drawAdmin();
+    } catch (e) { fail(e); }
+  };
+  $('#sc').onclick = async () => { const c = $('#a-code').value.trim(); if (!c) return; try { await db.doc('config/code').set({ value: c }); toast('कोड सेव हो गया'); } catch (e) { fail(e); } };
+  app.querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => { try { await db.doc('users/' + b.dataset.u).update({ addCount: 0 }); await db.doc('requests/' + b.dataset.ok).delete(); toast('Approve हो गया'); } catch (e) { fail(e); } });
+  app.querySelectorAll('[data-g]').forEach(b => b.onclick = async () => { const n = +prompt('कितने कॉइन देने हैं?'); if (!n) return; try { await db.doc('users/' + b.dataset.g).update({ coins: FV.increment(n) }); toast(n + ' कॉइन दे दिए'); } catch (e) { fail(e); } });
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (confirm('मैच हटाना है?')) { try { await db.doc('matches/' + b.dataset.del).delete(); } catch (e) { fail(e); } } });
+}
+</script>
+</body>
+</html>
