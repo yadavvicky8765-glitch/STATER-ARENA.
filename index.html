@@ -1,0 +1,492 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1b2230" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Starter Arena" />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="apple-touch-icon" href="assets/icon-192.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+
+  <title>Starter Arena — Free Fire Multiplayer Tournaments</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase Compat SDKs -->
+  <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-firestore-compat.js"></script>
+  <!-- Google Fonts: Inter & Rajdhani -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Rajdhani:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #070A12;
+      color: #F8FAFC;
+      -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
+    }
+    .font-display {
+      font-family: 'Rajdhani', 'Inter', sans-serif;
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.78);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .fire-gradient {
+      background: linear-gradient(135deg, #F97316 0%, #EA580C 50%, #DC2626 100%);
+    }
+    .gold-gradient {
+      background: linear-gradient(135deg, #FACC15 0%, #F59E0B 100%);
+    }
+    .hero-banner-bg {
+      background:
+        radial-gradient(circle at 85% 20%, rgba(249, 115, 22, 0.32) 0%, transparent 50%),
+        radial-gradient(circle at 15% 85%, rgba(220, 38, 38, 0.25) 0%, transparent 55%),
+        linear-gradient(145deg, #111827 0%, #090D16 100%);
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[#070A12] text-slate-100 selection:bg-orange-500 selection:text-white">
+  <!-- Main Application Root -->
+  <div id="app" class="min-h-screen flex flex-col"></div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[92%] max-w-sm pointer-events-none"></div>
+
+  <!-- Modal Dialog Container -->
+  <div id="modal-root" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/80 backdrop-blur-sm p-4"></div>
+
+  <script>
+    (function () {
+      const STORAGE_KEY = 'starter_arena_state_v1';
+      const FREE_CLAIM_LIMIT = 3;
+      const FREE_CLAIM_AMOUNT = 20;
+
+      // User's Firebase Project Configuration
+      const DEFAULT_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyCqePCF-QoV1cqubGAbdzqSd9UGEZArT50",
+        authDomain: "starter-arena.firebaseapp.com",
+        projectId: "starter-arena",
+        storageBucket: "starter-arena.firebasestorage.app",
+        messagingSenderId: "731332767852",
+        appId: "1:731332767852:web:6da6318d849c442bb1a849",
+        measurementId: "G-16VY75TRKY"
+      };
+
+      let db = null;
+      let fbConnected = false;
+      let unsubMatches = null;
+      let unsubUsers = null;
+      let unsubRequests = null;
+      let unsubMeta = null;
+
+      // Default Tournament Matches
+      const DEFAULT_MATCHES = [
+        {
+          id: 'm_101',
+          title: 'Bermuda Booyah Clash',
+          mode: 'Solo',
+          map: 'Bermuda',
+          entryFee: 10,
+          winningPrize: 150,
+          perKill: 5,
+          maxSlots: 48,
+          joinedUsers: ['demo_1', 'demo_2', 'demo_3'],
+          roomId: '88492014',
+          roomPass: 'FF2026',
+          status: 'Live',
+          timeLabel: 'Today • 9:30 PM',
+          createdAt: 1700000003
+        },
+        {
+          id: 'm_102',
+          title: 'Purgatory Duo Rush',
+          mode: 'Duo',
+          map: 'Purgatory',
+          entryFee: 15,
+          winningPrize: 300,
+          perKill: 8,
+          maxSlots: 24,
+          joinedUsers: ['demo_1'],
+          roomId: '',
+          roomPass: '',
+          status: 'Upcoming',
+          timeLabel: 'Today • 10:15 PM',
+          createdAt: 1700000002
+        },
+        {
+          id: 'm_103',
+          title: 'Kalahari Squad War',
+          mode: 'Squad',
+          map: 'Kalahari',
+          entryFee: 20,
+          winningPrize: 500,
+          perKill: 10,
+          maxSlots: 12,
+          joinedUsers: [],
+          roomId: '44910293',
+          roomPass: 'SQUAD99',
+          status: 'Upcoming',
+          timeLabel: 'Tomorrow • 8:00 PM',
+          createdAt: 1700000001
+        }
+      ];
+
+      // Default Demo Players so Room rosters & Admin view look rich right away
+      const DEFAULT_USERS = [
+        {
+          id: 'demo_1',
+          ign: 'SHADOW_FF',
+          ffUid: '2481904412',
+          username: 'player1',
+          password: '123',
+          coins: 45,
+          freeClaimsUsed: 1,
+          transactions: [
+            { id: 'tx_1', type: 'credit', title: 'Free Starter Claim #1', amount: 20, date: 'Today, 06:15 PM' },
+            { id: 'tx_2', type: 'credit', title: 'Admin Coin Top-Up', amount: 50, date: 'Today, 06:30 PM' },
+            { id: 'tx_3', type: 'debit', title: 'Joined: Bermuda Booyah Clash', amount: 10, date: 'Today, 07:00 PM' },
+            { id: 'tx_4', type: 'debit', title: 'Joined: Purgatory Duo Rush', amount: 15, date: 'Today, 07:12 PM' }
+          ]
+        },
+        {
+          id: 'demo_2',
+          ign: 'VIPER_KING',
+          ffUid: '1938472610',
+          username: 'viper',
+          password: '123',
+          coins: 20,
+          freeClaimsUsed: 2,
+          transactions: []
+        },
+        {
+          id: 'demo_3',
+          ign: 'BLAZE_OP',
+          ffUid: '5592018473',
+          username: 'blaze',
+          password: '123',
+          coins: 10,
+          freeClaimsUsed: 3,
+          transactions: []
+        }
+      ];
+
+      // Load state from LocalStorage
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            return {
+              users: Array.isArray(parsed.users) && parsed.users.length ? parsed.users : DEFAULT_USERS,
+              matches: Array.isArray(parsed.matches) && parsed.matches.length ? parsed.matches : DEFAULT_MATCHES,
+              coinRequests: Array.isArray(parsed.coinRequests) ? parsed.coinRequests : [],
+              adminCoins: typeof parsed.adminCoins === 'number' ? parsed.adminCoins : 5000,
+              adminCreds: parsed.adminCreds || { username: 'admin', password: '123' },
+              session: parsed.session || null
+            };
+          }
+        } catch (e) {}
+        return {
+          users: DEFAULT_USERS,
+          matches: DEFAULT_MATCHES,
+          coinRequests: [],
+          adminCoins: 5000,
+          adminCreds: { username: 'admin', password: '123' },
+          session: null
+        };
+      }
+
+      let state = loadState();
+      let uiState = {
+        authTab: 'login',       // 'login' | 'signup'
+        userTab: 'tournaments', // 'tournaments' | 'mymatches' | 'wallet'
+        modeFilter: 'All',      // 'All' | 'Solo' | 'Duo' | 'Squad'
+        adminTab: 'matches'     // 'matches' | 'requests' | 'players'
+      };
+
+      function saveLocalOnly() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {}
+      }
+
+      function saveState() {
+        saveLocalOnly();
+        if (fbConnected && db) {
+          try {
+            db.collection('sa_meta').doc('config').set({
+              adminCoins: state.adminCoins,
+              adminCreds: state.adminCreds
+            }, { merge: true }).catch(() => {});
+
+            state.matches.forEach(m => {
+              db.collection('sa_matches').doc(m.id).set(m, { merge: true }).catch(() => {});
+            });
+
+            state.users.forEach(u => {
+              db.collection('sa_users').doc(u.id).set(u, { merge: true }).catch(() => {});
+            });
+
+            state.coinRequests.forEach(r => {
+              db.collection('sa_coin_requests').doc(r.id).set(r, { merge: true }).catch(() => {});
+            });
+          } catch (e) {}
+        }
+      }
+
+      // Initialize Firebase Firestore Sync
+      function initFirebase(config) {
+        if (!config || !config.apiKey || !config.projectId || typeof firebase === 'undefined') {
+          fbConnected = false;
+          return false;
+        }
+        try {
+          if (!firebase.apps.length) {
+            firebase.initializeApp(config);
+          }
+          db = firebase.firestore();
+          fbConnected = true;
+          startFirestoreSync();
+          return true;
+        } catch (e) {
+          fbConnected = false;
+          return false;
+        }
+      }
+
+      function startFirestoreSync() {
+        if (!db) return;
+        if (unsubMatches) unsubMatches();
+        if (unsubUsers) unsubUsers();
+        if (unsubRequests) unsubRequests();
+        if (unsubMeta) unsubMeta();
+
+        unsubMatches = db.collection('sa_matches').onSnapshot((snap) => {
+          const list = [];
+          snap.forEach(doc => list.push(doc.data()));
+          if (list.length > 0) {
+            list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            state.matches = list;
+            saveLocalOnly();
+            render();
+          }
+        }, () => {});
+
+        unsubUsers = db.collection('sa_users').onSnapshot((snap) => {
+          const list = [];
+          snap.forEach(doc => list.push(doc.data()));
+          if (list.length > 0) {
+            state.users = list;
+            saveLocalOnly();
+            render();
+          }
+        }, () => {});
+
+        unsubRequests = db.collection('sa_coin_requests').onSnapshot((snap) => {
+          const list = [];
+          snap.forEach(doc => list.push(doc.data()));
+          list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          state.coinRequests = list;
+          saveLocalOnly();
+          render();
+        }, () => {});
+
+        unsubMeta = db.collection('sa_meta').doc('config').onSnapshot((doc) => {
+          if (doc.exists) {
+            const d = doc.data();
+            if (typeof d.adminCoins === 'number') state.adminCoins = d.adminCoins;
+            if (d.adminCreds) state.adminCreds = d.adminCreds;
+            saveLocalOnly();
+            render();
+          }
+        }, () => {});
+      }
+
+      // Utility Helpers
+      const appEl = document.getElementById('app');
+      const modalRoot = document.getElementById('modal-root');
+      const toastContainer = document.getElementById('toast-container');
+
+      function formatNow() {
+        const d = new Date();
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' • ' +
+               d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+      }
+
+      function showToast(message, type) {
+        const colors = {
+          success: 'bg-emerald-600/95 border-emerald-400/40 text-white',
+          error: 'bg-rose-600/95 border-rose-400/40 text-white',
+          info: 'bg-slate-800/95 border-orange-500/40 text-slate-100'
+        };
+        const toast = document.createElement('div');
+        toast.className = `pointer-events-auto px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium flex items-center gap-2 transition-all duration-300 ${colors[type || 'info']}`;
+        toast.textContent = message;
+        toastContainer.appendChild(toast);
+        setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateY(8px)';
+          setTimeout(() => toast.remove(), 300);
+        }, 2800);
+      }
+
+      function closeModal() {
+        modalRoot.classList.add('hidden');
+        modalRoot.classList.remove('flex');
+        modalRoot.innerHTML = '';
+      }
+
+      function openModal(html) {
+        modalRoot.innerHTML = html;
+        modalRoot.classList.remove('hidden');
+        modalRoot.classList.add('flex');
+        modalRoot.querySelectorAll('[data-modal-close]').forEach(el => {
+          el.addEventListener('click', closeModal);
+        });
+      }
+
+      function escapeHtml(str) {
+        return String(str || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function copyText(text, label) {
+        if (!text) return;
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          showToast(`${label} copied: ${text}`, 'success');
+        } catch (e) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(
+              () => showToast(`${label} copied: ${text}`, 'success'),
+              () => showToast('Copy failed', 'error')
+            );
+          } else {
+            showToast('Copy failed', 'error');
+          }
+        }
+      }
+
+      function getCurrentUser() {
+        if (!state.session || state.session.role !== 'user') return null;
+        return state.users.find(u => u.id === state.session.userId) || null;
+      }
+
+      function addTransaction(user, type, title, amount) {
+        if (!Array.isArray(user.transactions)) user.transactions = [];
+        user.transactions.unshift({
+          id: 'tx_' + Date.now() + '_' + Math.floor(Math.random() * 999),
+          type, // 'credit' | 'debit'
+          title,
+          amount: Number(amount),
+          date: formatNow()
+        });
+      }
+
+      // Coin Icon SVG Helper
+      function coinIcon(sizeClass = 'w-4 h-4') {
+        return `<svg class="${sizeClass} inline-block shrink-0 text-amber-400" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="12" r="10" fill="#F59E0B"/>
+          <circle cx="12" cy="12" r="7.5" fill="#FACC15"/>
+          <text x="12" y="16" text-anchor="middle" font-size="10" font-weight="900" fill="#78350F" font-family="Inter, sans-serif">C</text>
+        </svg>`;
+      }
+
+      // =========================================================
+      // 1. AUTHENTICATION VIEW (LOGIN / SIGNUP + ADMIN BUTTON)
+      // =========================================================
+      function renderAuthView() {
+        const isLogin = uiState.authTab === 'login';
+        appEl.innerHTML = `
+          <div class="min-h-screen flex flex-col relative overflow-hidden">
+            <!-- Top Header -->
+            <header class="w-full max-w-md mx-auto px-4 pt-4 pb-2 flex items-center justify-between z-10">
+              <div class="flex items-center gap-2.5">
+                <img src="assets/logo.png" alt="Starter Arena logo"
+                     class="w-10 h-10 rounded-xl object-cover border border-orange-400/30 shadow-lg shadow-orange-600/20" />
+                <div>
+                  <h1 class="font-display font-bold text-xl tracking-wide leading-none text-white">STARTER ARENA</h1>
+                  <p class="text-[11px] text-orange-400 font-medium tracking-wider uppercase">Free Fire Tournaments</p>
+                </div>
+              </div>
+              <button id="open-admin-login-btn" class="px-3.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-amber-500/40 text-amber-400 text-xs font-bold tracking-wide uppercase flex items-center gap-1.5 shadow-md transition active:scale-95">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                Admin
+              </button>
+            </header>
+
+            <!-- Main Auth Card -->
+            <main class="flex-1 w-full max-w-md mx-auto px-4 py-3 flex flex-col justify-center z-10">
+              <!-- Lightweight Custom Esports Banner (Zero Base64 Bloat) -->
+              <div class="hero-banner-bg relative rounded-2xl overflow-hidden mb-5 p-5 border border-orange-500/25 shadow-2xl">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30 mb-2">
+                      <span class="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
+                      Season 1 Live
+                    </span>
+                    <h2 class="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-white leading-tight">
+                      DROP IN. DOMINATE.<br/>
+                      <span class="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-300">WIN BOOYAH REWARDS</span>
+                    </h2>
+                    <p class="text-xs text-slate-300/90 mt-1.5">
+                      New players get <strong class="text-amber-300">3 Free Coin Claims</strong> to enter Solo, Duo & Squad rooms!
+                    </p>
+                  </div>
+                  <!-- Trophy & Crosshair Vector Emblem -->
+                  <div class="w-16 h-16 rounded-2xl fire-gradient/20 border border-orange-500/30 flex items-center justify-center shrink-0 bg-orange-500/10">
+                    <svg class="w-9 h-9 text-orange-400" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M8 21h8m-4-4v4m-5-9a5 5 0 0010 0V5H7v7zm10-5h2a2 2 0 012 2v1a3 3 0 01-3 3h-1M7 7H5a2 2 0 00-2 2v1a3 3 0 003 3h1"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Login / Signup Box -->
+              <div class="glass-card rounded-2xl p-5 shadow-2xl">
+                <!-- Tabs -->
+                <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-900/90 border border-white/5 mb-5">
+                  <button data-auth-tab="login" class="py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition ${isLogin ? 'fire-gradient text-white shadow-lg' : 'text-slate-400 hover:text-white'}">
+                    Player Login
+                  </button>
+                  <button data-auth-tab="signup" class="py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition ${!isLogin ? 'fire-gradient text-white shadow-lg' : 'text-slate-400 hover:text-white'}">
+                    Create Account
+                  </button>
+                </div>
+
+                ${isLogin ? `
+                  <form id="login-form" class="space-y-4">
+                    <div>
+                      <label class="block text-xs font-semibold text-slate-300 mb-1.5">Username or Free Fire UID</label>
+                      <input type="text" id="login-ident" required placeholder="e.g. player1 or 2481904412" class="w-full px-3.5 py-3 rounded-xl bg-slate-900/90 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-semibold text-slate-300 mb-1.5">Password</label>
+                      <input type="password" id="login-pass" required placeholder="Enter your password" class="w-full px-3.5 py-3 rounded-xl bg-slate-900/90 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                    </div>
+                    <button type="submit" class="w-full py-3.5 rounded-xl fire-gradient text-white font-bold text-sm uppercase tracking-wid
